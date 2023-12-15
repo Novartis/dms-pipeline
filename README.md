@@ -27,10 +27,7 @@ This pipeline is implemented using Snakemake within a conda environment. To use 
  * A working conda installation
  * A conda environment with Snakemake installed in it
 
-Snakemake then manages creating additional conda environments locally and installing the correct packages into them for each step (seamless for me).
-
-You can run the pipeline locally, or use Snakemake to manage job submission to the cluster.
-
+Snakemake then manages creating additional conda environments locally and installing the correct packages into them for each step.
 
 ### How do I get set up? ###
  * Create and activate a snakemake conda environment.
@@ -42,7 +39,7 @@ You can run the pipeline locally, or use Snakemake to manage job submission to t
 
 ### How do I get started? ###
 
-1. Create a new working directory that contains the Snakemake file, config file, and files in the envs and scripts directories. If you have git installed the easiest way to get these files is to clone them from Bitbucket. The goal is that you should be able to change just the config.yaml file to analyze data from a new set of samples.
+1. Clone this repository in your working directory. You will be able to analyze data from a new set of samples just by changing the config.yaml file
 
         mkdir myDMS
         cd myDMS
@@ -64,7 +61,6 @@ You can run the pipeline locally, or use Snakemake to manage job submission to t
     * **expected mutants**. This is a tab delimited txt file containing the wt reference sequence and the expected mutant sequences. At least one column is required: amplicon.\
     Expected mutant sequences are derived from the wt reference sequence and differ from the wt sequence by point mutations that lead to specific mutations in the amino acid sequence. Such expected mutant sequences are part of the experimental setup e.g. comparing different mutations with respect to fitness. Unexpected mutants are most often due to sequencing errors.
 
-    If you don't have reference, adapter or expected mutant sequences ask your collaborators to provide them to you.
 3. Run the `workflow/Snakemake` file: \
     3.1 Activate your snakemake conda environment
 
@@ -94,6 +90,4 @@ You can run the pipeline locally, or use Snakemake to manage job submission to t
     * The `summary.txt` contains a table with the number and percentage passing or failing each step in the pipeline. Concretely, it contains the following columns: total reads (number of read pairs in your fastq files), stitched reads (number of Illumina read pairs successfully stitched into one sequence), mapped reads (number of reads mapped to the reference sequence and successfully trimmed the adapter sequences), and, optionally, expected reads (number of reads that are also listed in your file containing the expected mutants). Columns starting with "perc" contain percentages of either the number of reads with respect to the total number of reads, or the number of reads in the previous step. \
     ![summary](support/summary.png)
 
-5. Find an html QC report in your output directory
-
-6. Find log files for each step in the log directory in the ouput directory specified by you in the config file.
+5. Find log files for each step in the log directory in the ouput directory specified by you in the config file.
