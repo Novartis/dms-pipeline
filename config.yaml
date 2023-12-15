@@ -1,0 +1,32 @@
+# output directory
+outdir: results
+
+# location of the samples config file, needs columns
+# "fastq_path": the path to the directory containing the fastq files
+# "fastq_name_R1": the file name of the file containing forward reads
+# "fastq_name_R2": the file name of the file containing reverse reads
+# "sample_name": name of the sample, creates new directories in the project 
+#   directory with these names
+samples_config: support/sample-sheet.txt
+
+# location of the wild type sequence in fasta format
+gene_seq: support/MITF.fa
+
+
+# adaptor sequence at the 5' end, used for trimming by cutadapt
+g: CTGCCCCGCCAACCTGCCC
+
+# cutadapt adaptor sequence at the 3' end (please specify in 5' -> 3' direction),
+# used for trimming by cutadapt
+a: CTGAGCCTGATCCCTAGCACCG
+
+
+# location of file containting expected mutants, needs at least a column called "amplicon"
+# This file is optional, put False if not provided
+expected_mutants: /path/to/expected/mutants.txt
+
+
+################################################################################
+## Computational resources for rules
+# number of threads granted to rules capable of multi-processing
+threads: 4
