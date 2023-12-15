@@ -1,0 +1,236 @@
+import pandas as pd
+import os
+
+
+include: "rules/common.smk"
+
+
+### configuration items and global variables ###################################
+################################################################################
+
+OUTPUT_DIR = config["outdir"]
+LOG_DIR = os.path.join(OUTPUT_DIR, "logs")
+LOG_DIR_CLUSTER = os.path.join(OUTPUT_DIR, "logs_cluster")
+GENE_FASTA = config["gene_seq"]
+
+THREADS = config["threads"]
+
+
+localrules:
+    all,
+    prep_fastq,
+
+
+### rules ######################################################################
+################################################################################
+
+
+rule all:
+    input:
+        "%s/summary.txt" % OUTPUT_DIR,
+
+
+rule prep_fastq:
+    input:
+        R1=lambda wildcards: get_orig_fastq(wildcards, mate="fastq_name_R1"),
+        R2=lambda wildcards: get_orig_fastq(wildcards, mate="fastq_name_R2"),
+    output:
+        R1="%s/{s}/file_R1.fastq.gz" % (OUTPUT_DIR),
+        R2="%s/{s}/file_R2.fastq.gz" % (OUTPUT_DIR),
+    params:
+        cluster_log_path=LOG_DIR_CLUSTER,
+        wc=lambda wc: "_".join(wc),
+    log:
+        "%s/{s}/prep_fastq.log" % (LOG_DIR),
+    conda:
+        "envs/py.yaml"
+    shell:
+        """
+        ln -s -r {input.R1} {output.R1}
+        ln -s -r {input.R2} {output.R2}
+        """
+
+
+rule stitch_reads:
+    input:
+        R1="%s/{s}/file_R1.fastq.gz" % (OUTPUT_DIR),
+        R2="%s/{s}/file_R2.fastq.gz" % (OUTPUT_DIR),
+    output:
+        stitched="%s/{s}/stitched.fastq.gz" % (OUTPUT_DIR),
+        R1="%s/{s}/unstitched_1.fastq.gz" % (OUTPUT_DIR),
+        R2="%s/{s}/unstitched_2.fastq.gz" % (OUTPUT_DIR),
+    params:
+        unstitched=lambda wildcards, output: output.R1.replace("_1.fastq.gz", ""),
+        cluster_log_path=LOG_DIR_CLUSTER,
+        wc=lambda wc: "_".join(wc),
+    log:
+        "%s/{s}/stitch_reads.log" % (LOG_DIR),
+    resources:
+        runtime=18000,
+        memory="16G",
+    conda:
+        "envs/ngmerge.yaml"
+    threads: THREADS
+    shell:
+        """
+        NGmerge -1 {input.R1} -2 {input.R2} -o {output.stitched} \
+          -f {params.unstitched} -l {log} -n {threads} -d
+        """
+
+
+rule prep_gene_fasta:
+    input:
+        GENE_FASTA,
+    output:
+        fasta="%s/gene.fa" % (OUTPUT_DIR),
+        bt2_idx="%s/gene.1.bt2" % (OUTPUT_DIR),
+    log:
+        "%s/prep_gene_fasta.log" % (LOG_DIR),
+    params:
+        idx_name=lambda wildcards, output: output.fasta.replace(".fa", ""),
+        cluster_log_path=LOG_DIR_CLUSTER,
+        wc=lambda wc: "_".join(wc),
+    resources:
+        runtime=18000,
+        memory="32G",
+    conda:
+        "envs/bowtie.yaml"
+    threads: THREADS
+    shell:
+        """
+        cp {input} {output.fasta} >> {log}
+        samtools faidx {output.fasta} >> {log}
+        bowtie2-build -f {output.fasta} {params.idx_name} >> {log} 
+        """
+
+
+rule align_bt2:
+    input:
+        stitched="%s/{s}/stitched.fastq.gz" % (OUTPUT_DIR),
+        bt2_idx="%s/gene.1.bt2" % (OUTPUT_DIR),
+    output:
+        stitched="%s/{s}/aligned.bam" % (OUTPUT_DIR),
+        unaligned="%s/{s}/unaligned.fastq" % (OUTPUT_DIR),
+    log:
+        "%s/{s}/align_bt2.log" % (LOG_DIR),
+    params:
+        idx_name=lambda wildcards, input: input.bt2_idx.replace(".1.bt2", ""),
+        cluster_log_path=LOG_DIR_CLUSTER,
+        wc=lambda wc: "_".join(wc),
+    resources:
+        runtime=18000,
+        memory="32G",
+    conda:
+        "envs/bowtie.yaml"
+    threads: THREADS
+    shell:
+        """
+        bowtie2 \
+            -x {params.idx_name} \
+            -U {input.stitched} \
+            -p {threads} \
+            --very-sensitive-local \
+            --un {output.unaligned} \
+            --no-unal \
+            2> {log} \
+        | samtools sort -@ {threads} -m 5G \
+            -o {output.stitched} 
+        samtools index {output.stitched}
+        """
+
+
+# TODO: cutadapt can account for mismatch mutations in the adapter regions but
+# not for deletions or insertions. This can lead to a loss of reads in this
+# step.
+# How to improve: maybe think of alternatives for cutadapt e.g. use CIGAR string
+# in bowtie output to trimm reads.
+rule get_aligned_fasta:
+    input:
+        "%s/{s}/aligned.bam" % (OUTPUT_DIR),
+    output:
+        "%s/{s}/trimmed.fa" % (OUTPUT_DIR),
+    params:
+        g=config["g"],
+        a=config["a"],
+        cluster_log_path=LOG_DIR_CLUSTER,
+        wc=lambda wc: "_".join(wc),
+    resources:
+        runtime=18000,
+        memory="16G",
+    conda:
+        "envs/trim_convert.yaml"
+    log:
+        "%s/{s}/get_aligned_fasta.log" % (LOG_DIR),
+    shell:
+        """
+        samtools view {input} \
+        | gawk 'BEGIN{{FS=\"\\t\"; OFS=\"\\t\"}} {{print \"> \"$1\"\\n\"$10}}' - \
+        | cutadapt --match-read-wildcards \
+                   -g {params.g} \
+                   -a {params.a} \
+                   -n 2 \
+                   -o {output} -
+        """
+
+
+rule count_trimmed_aligned_fasta:
+    input:
+        sequences="%s/{s}/trimmed.fa" % (OUTPUT_DIR),
+    output:
+        counts="%s/{s}/sequence_counts.csv" % (OUTPUT_DIR),
+    log:
+        log1="%s/{s}/count_trimmed_aligned_fasta.log" % (LOG_DIR),
+    params:
+        expected_mutants=config["expected_mutants"],
+        cluster_log_path=LOG_DIR_CLUSTER,
+        wc=lambda wc: "_".join(wc),
+    resources:
+        runtime=18000,
+        memory="32G",
+    conda:
+        "envs/py.yaml"
+    script:
+        "scripts/count_sequences.py"
+
+
+rule summarize:
+    input:
+        counts=expand("%s/{s}/sequence_counts.csv" % (OUTPUT_DIR), s=get_samples()),
+    output:
+        summary="%s/summary.txt" % OUTPUT_DIR,
+    log:
+        log1="%s/summarize.log" % (LOG_DIR),
+    params:
+        samples=get_samples(),
+        output_dir=lambda wildcards, output: os.path.dirname(output.summary),
+        cluster_log_path=LOG_DIR_CLUSTER,
+        wc=lambda wc: "_".join(wc),
+    resources:
+        runtime=18000,
+        memory="16G",
+    conda:
+        "envs/py.yaml"
+    script:
+        "scripts/summarize.py"
+
+
+rule create_count_matrix:
+    input:
+        counts=expand("%s/{s}/sequence_counts.csv" % (OUTPUT_DIR), s=get_samples()),
+    output:
+        count_matrix="%s/count_matrix.csv" % OUTPUT_DIR,
+    log:
+        log1="%s/count_matrix.log" % (LOG_DIR),
+    params:
+        samples=get_samples(),
+        expected_mutants=config["expected_mutants"],
+        output_dir=lambda wildcards, output: os.path.dirname(output.count_matrix),
+        cluster_log_path=LOG_DIR_CLUSTER,
+        wc=lambda wc: "_".join(wc),
+    resources:
+        runtime=18000,
+        memory="16G",
+    conda:
+        "envs/py.yaml"
+    script:
+        "scripts/create_count_matrix.py"
