@@ -39,7 +39,7 @@ Snakemake then manages creating additional conda environments locally and instal
 
 ### How do I get started? ###
 
-1. Clone this repository in your working directory. The goal is that you should be able to change just the config.yaml file to analyze data from a new set of samples.
+1. Clone this repository in your working directory. You will be able to analyze data from a new set of samples just by changing the config.yaml file
 
         mkdir myDMS
         cd myDMS
